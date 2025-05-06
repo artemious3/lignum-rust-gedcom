@@ -48,15 +48,13 @@ impl<'a> Parser<'a> {
                     "HEAD" => data.header = self.parse_header(),
                     "FAM" => data.add_family(self.parse_family(level, pointer)),
                     "INDI" => data.add_individual(self.parse_individual(level, pointer)),
-                    "REPO" => self.ignore_tag(level),
-                    "SOUR" => self.ignore_tag(level),
-                    "SUBM" => self.ignore_tag(level),
+                    "REPO" => self.skip_level(level),
+                    "SOUR" => self.skip_level(level),
+                    "SUBM" => self.skip_level(level),
                     "TRLR" => break,
                     _ => {
                         println!("WARNING: {} Unhandled tag {}", self.dbg(), tag);
-                        while self.tokenizer.current_token != Token::Level(level) {
-                            self.tokenizer.next_token();
-                        }
+                        self.skip_level(level);
                     }
                 };
             } else if let Token::CustomTag(tag) = &self.tokenizer.current_token {
@@ -68,16 +66,14 @@ impl<'a> Parser<'a> {
                     self.dbg(),
                     custom_data
                 );
-                while self.tokenizer.current_token != Token::Level(0) {
-                    self.tokenizer.next_token();
-                }
+                self.skip_level(level);
             } else {
                 println!(
                     "WARNING: {} Unhandled token {:?}",
                     self.dbg(),
                     self.tokenizer.current_token
                 );
-                self.tokenizer.next_token();
+                self.skip_level(level);
             };
         }
 
@@ -148,9 +144,11 @@ impl<'a> Parser<'a> {
     }
 
     /// Parses SUBM top-level tag
+    #[allow(dead_code)]
     fn parse_submitter(&mut self, level: u8, xref: Option<String>) -> Submitter {
         // skip over SUBM tag name
         self.tokenizer.next_token();
+        let mut current_level = level;
 
         let mut submitter = Submitter::new(xref);
         while self.tokenizer.current_token != Token::Level(level) {
@@ -161,18 +159,21 @@ impl<'a> Parser<'a> {
                         submitter.address = Some(self.parse_address(level + 1));
                     }
                     "PHON" => submitter.phone = Some(self.take_line_value()),
-                    _ =>{
+                    _ => {
                         println!("WARNING: {} Unhandled Submitter Tag: {}", self.dbg(), tag);
-                        self.tokenizer.next_token();
+                        self.skip_level(current_level);
                     }
                 },
-                Token::Level(_) => self.tokenizer.next_token(),
-                _ =>{ 
+                Token::Level(new_level) => {
+                    current_level = *new_level;
+                    self.tokenizer.next_token();
+                }
+                _ => {
                     println!(
                         "WARNING: Unhandled Submitter Token: {:?}",
                         self.tokenizer.current_token
                     );
-                    self.tokenizer.next_token();
+                    self.skip_level(current_level);
                 }
             }
         }
@@ -181,26 +182,27 @@ impl<'a> Parser<'a> {
     }
 
     /// Parses INDI top-level tag
-    fn parse_individual(&mut self, level: u8, xref: Option<String>) -> Individual {
+    fn parse_individual(&mut self, start_level: u8, xref: Option<String>) -> Individual {
         // skip over INDI tag name
         self.tokenizer.next_token();
         let mut individual = Individual::new(xref);
+        let mut current_level = start_level;
 
-        while self.tokenizer.current_token != Token::Level(level) {
+        while self.tokenizer.current_token != Token::Level(start_level) {
             match &self.tokenizer.current_token {
                 Token::Tag(tag) => match tag.as_str() {
-                    "NAME" => individual.name = Some(self.parse_name(level + 1)),
+                    "NAME" => individual.name = Some(self.parse_name(current_level)),
                     "SEX" => individual.sex = self.parse_gender(),
                     "ADOP" | "BIRT" | "BAPM" | "BARM" | "BASM" | "BLES" | "BURI" | "CENS"
                     | "CHR" | "CHRA" | "CONF" | "CREM" | "DEAT" | "EMIG" | "FCOM" | "GRAD"
                     | "IMMI" | "NATU" | "ORDN" | "RETI" | "RESI" | "PROB" | "WILL" | "EVEN" => {
                         let tag_clone = tag.clone();
-                        individual.add_event(self.parse_event(tag_clone.as_str(), level + 1));
+                        individual.add_event(self.parse_event(tag_clone.as_str(), current_level));
                     }
                     "FAMC" | "FAMS" => {
                         let tag_clone = tag.clone();
                         individual
-                            .add_family(self.parse_family_link(tag_clone.as_str(), level + 1));
+                            .add_family(self.parse_family_link(tag_clone.as_str(), current_level));
                     }
                     "CHAN" => {
                         // assuming it always only has a single DATE subtag
@@ -210,20 +212,23 @@ impl<'a> Parser<'a> {
                     }
                     _ => {
                         println!("WARNING: {} Unhandled Individual Tag: {}", self.dbg(), tag);
-                        self.tokenizer.next_token();
+                        self.skip_level(current_level);
                     }
                 },
                 Token::CustomTag(tag) => {
                     let tag_clone = tag.clone();
                     individual.add_custom_data(self.parse_custom_tag(tag_clone))
                 }
-                Token::Level(_) => self.tokenizer.next_token(),
+                Token::Level(new_level) => {
+                    current_level = *new_level;
+                    self.tokenizer.next_token();
+                }
                 _ => {
                     println!(
                         "WARNING: Unhandled Individual Token: {:?}",
                         self.tokenizer.current_token
                     );
-                    self.tokenizer.next_token();
+                    self.skip_level(current_level);
                 }
             }
         }
@@ -232,27 +237,34 @@ impl<'a> Parser<'a> {
     }
 
     /// Parses FAM top-level tag
-    fn parse_family(&mut self, level: u8, xref: Option<String>) -> Family {
+    fn parse_family(&mut self, start_level: u8, xref: Option<String>) -> Family {
         // skip over FAM tag name
         self.tokenizer.next_token();
         let mut family = Family::new(xref);
+        let mut current_level = start_level;
 
-        while self.tokenizer.current_token != Token::Level(level) {
+        while self.tokenizer.current_token != Token::Level(start_level) {
             match &self.tokenizer.current_token {
                 Token::Tag(tag) => match tag.as_str() {
-                    "MARR" => family.add_event(self.parse_event("MARR", level + 1)),
+                    "MARR" => family.add_event(self.parse_event("MARR", current_level)),
                     "HUSB" => family.set_individual1(self.take_line_value()),
                     "WIFE" => family.set_individual2(self.take_line_value()),
                     "CHIL" => family.add_child(self.take_line_value()),
-                    _ =>{ 
+                    _ => {
                         println!("WARNING: {} Unhandled Family Tag: {}", self.dbg(), tag);
-                        self.tokenizer.next_token();
+                        self.skip_level(current_level);
                     }
                 },
-                Token::Level(_) => self.tokenizer.next_token(),
-                _ => {
-                    println!("WARNING: Unhandled Family Token: {:?}", self.tokenizer.current_token);
+                Token::Level(new_level) => {
+                    current_level = *new_level;
                     self.tokenizer.next_token();
+                }
+                _ => {
+                    println!(
+                        "WARNING: Unhandled Family Token: {:?}",
+                        self.tokenizer.current_token
+                    );
+                    self.skip_level(current_level);
                 }
             }
         }
@@ -261,22 +273,25 @@ impl<'a> Parser<'a> {
         family
     }
 
-    fn ignore_tag(&mut self, level : u8) {
+    fn skip_level(&mut self, level: u8) {
+        println!("Skipping from {}, level : {}", self.dbg(), level);
         self.tokenizer.next_token();
         loop {
             if let Token::Level(cur_level) = self.tokenizer.current_token {
                 if cur_level <= level {
+                    println!("Skipped until {}", self.dbg());
                     break;
                 }
             }
             self.tokenizer.next_token();
         }
-
     }
 
+    #[allow(dead_code)]
     fn parse_source(&mut self, level: u8, xref: Option<String>) -> Source {
         // skip SOUR tag
         self.tokenizer.next_token();
+        let mut current_level = level;
         let mut source = Source::new(xref);
 
         loop {
@@ -298,15 +313,22 @@ impl<'a> Parser<'a> {
                     "ABBR" => source.abbreviation = Some(self.take_continued_text(level + 1)),
                     "TITL" => source.title = Some(self.take_continued_text(level + 1)),
                     "REPO" => source.add_repo_citation(self.parse_repo_citation(level + 1)),
-                    _ =>{ 
+                    _ => {
                         println!("WARNING: {} Unhandled Source Tag: {}", self.dbg(), tag);
-                        self.tokenizer.next_token();
+                        self.skip_level(current_level);
                     }
                 },
-                Token::Level(_) => self.tokenizer.next_token(),
-                _ =>{ 
-                    println!("WARNING: Unhandled Source Token: {:?}", self.tokenizer.current_token);
+                Token::Level(new_level) => {
+                    current_level = *new_level;
                     self.tokenizer.next_token();
+                }
+                Token::LineValue(_) => {}
+                _ => {
+                    println!(
+                        "WARNING: Unhandled Source Token: {:?}",
+                        self.tokenizer.current_token
+                    );
+                    self.skip_level(current_level);
                 }
             }
         }
@@ -316,9 +338,11 @@ impl<'a> Parser<'a> {
     }
 
     /// Parses REPO top-level tag.
+    #[allow(dead_code)]
     fn parse_repository(&mut self, level: u8, xref: Option<String>) -> Repository {
         // skip REPO tag
         self.tokenizer.next_token();
+        let mut current_level = level;
         let mut repo = Repository {
             xref,
             name: None,
@@ -333,17 +357,23 @@ impl<'a> Parser<'a> {
             match &self.tokenizer.current_token {
                 Token::Tag(tag) => match tag.as_str() {
                     "NAME" => repo.name = Some(self.take_line_value()),
-                    "ADDR" => repo.address = Some(self.parse_address(level + 1)),
-                    _ =>{
+                    "ADDR" => repo.address = Some(self.parse_address(current_level)),
+                    _ => {
                         println!("WARNING : {} Unhandled Repository Tag: {}", self.dbg(), tag);
-                        self.tokenizer.next_token();
+                        self.skip_level(current_level);
                     }
                 },
-                Token::Level(_) => self.tokenizer.next_token(),
-                _ => println!(
-                    "WARNINF : Unhandled Repository Token: {:?}",
-                    self.tokenizer.current_token
-                ),
+                Token::Level(new_level) => {
+                    current_level = *new_level;
+                    self.tokenizer.next_token();
+                }
+                _ => {
+                    println!(
+                        "WARNING : Unhandled Repository Token: {:?}",
+                        self.tokenizer.current_token
+                    );
+                    self.skip_level(current_level);
+                }
             }
         }
         // println!("found repositiory:\n{:#?}", repo);
@@ -360,7 +390,9 @@ impl<'a> Parser<'a> {
         // skip GEDC tag
         self.tokenizer.next_token();
 
-        while self.tokenizer.current_token != Token::Level(1) {
+        while self.tokenizer.current_token != Token::Level(1)
+           && self.tokenizer.current_token != Token::Level(0)
+        {
             match &self.tokenizer.current_token {
                 Token::Tag(tag) => match tag.as_str() {
                     "VERS" => header.gedcom_version = Some(self.take_line_value()),
@@ -373,7 +405,7 @@ impl<'a> Parser<'a> {
                             , form);
                         }
                     }
-                    _ =>{
+                    _ => {
                         println!("WARNING: {} Unhandled GEDC Tag: {}", self.dbg(), tag);
                         self.tokenizer.next_token();
                     }
@@ -386,37 +418,40 @@ impl<'a> Parser<'a> {
                         &self.tokenizer.current_token
                     );
                     self.tokenizer.next_token();
-                } 
+                }
             }
         }
         header
     }
 
-    fn parse_family_link(&mut self, tag: &str, level: u8) -> FamilyLink {
+    fn parse_family_link(&mut self, tag: &str, start_level: u8) -> FamilyLink {
         let xref = self.take_line_value();
         let mut link = FamilyLink::new(xref, tag);
-
+        let mut current_level = start_level;
         loop {
             if let Token::Level(cur_level) = self.tokenizer.current_token {
-                if cur_level <= level {
+                if cur_level <= start_level {
                     break;
                 }
             }
             match &self.tokenizer.current_token {
                 Token::Tag(tag) => match tag.as_str() {
                     "PEDI" => link.set_pedigree(self.take_line_value().as_str()),
-                    _ =>{
+                    _ => {
                         println!("WARNING : {} Unhandled FamilyLink Tag: {}", self.dbg(), tag);
-                        self.tokenizer.next_token();
+                        self.skip_level(current_level);
                     }
                 },
-                Token::Level(_) => self.tokenizer.next_token(),
+                Token::Level(new_level) => {
+                    current_level = *new_level;
+                    self.tokenizer.next_token();
+                }
                 _ => {
                     println!(
-                    "WARNING: Unhandled FamilyLink Token: {:?}",
-                    self.tokenizer.current_token
+                        "WARNING: Unhandled FamilyLink Token: {:?}",
+                        self.tokenizer.current_token
                     );
-                    self.tokenizer.next_token();
+                    self.skip_level(current_level);
                 }
             }
         }
@@ -424,33 +459,41 @@ impl<'a> Parser<'a> {
         link
     }
 
-    fn parse_repo_citation(&mut self, level: u8) -> RepoCitation {
+    fn parse_repo_citation(&mut self, start_level: u8) -> RepoCitation {
         let xref = self.take_line_value();
         let mut citation = RepoCitation {
             xref,
             call_number: None,
         };
+        let mut current_level = start_level;
         loop {
             if let Token::Level(cur_level) = self.tokenizer.current_token {
-                if cur_level <= level {
+                if cur_level <= start_level {
                     break;
                 }
             }
             match &self.tokenizer.current_token {
                 Token::Tag(tag) => match tag.as_str() {
                     "CALN" => citation.call_number = Some(self.take_line_value()),
-                    _ =>{
-                        println!("WARNING: {} Unhandled RepoCitation Tag: {}", self.dbg(), tag);
-                        self.tokenizer.next_token();
+                    _ => {
+                        println!(
+                            "WARNING: {} Unhandled RepoCitation Tag: {}",
+                            self.dbg(),
+                            tag
+                        );
+                        self.skip_level(current_level);
                     }
                 },
-                Token::Level(_) => self.tokenizer.next_token(),
+                Token::Level(new_level) => {
+                    current_level = *new_level;
+                    self.tokenizer.next_token();
+                }
                 _ => {
                     println!(
                         "WARNING: Unhandled RepoCitation Token: {:?}",
                         self.tokenizer.current_token
                     );
-                    self.tokenizer.next_token();
+                    self.skip_level(current_level);
                 }
             }
         }
@@ -467,8 +510,11 @@ impl<'a> Parser<'a> {
                 "N" => Gender::Nonbinary,
                 "U" => Gender::Unknown,
                 _ => {
-                    println!("WARNING: {} Unknown gender value {}", self.dbg(), gender_string);
-                    self.tokenizer.next_token();
+                    println!(
+                        "WARNING: {} Unknown gender value {}",
+                        self.dbg(),
+                        gender_string
+                    );
                     Gender::Unknown
                 }
             };
@@ -483,13 +529,14 @@ impl<'a> Parser<'a> {
         gender
     }
 
-    fn parse_name(&mut self, level: u8) -> Name {
+    fn parse_name(&mut self, start_level: u8) -> Name {
         let mut name = Name::default();
         name.value = Some(self.take_line_value());
+        let mut current_level = start_level;
 
         loop {
             if let Token::Level(cur_level) = self.tokenizer.current_token {
-                if cur_level <= level {
+                if cur_level <= start_level {
                     break;
                 }
             }
@@ -500,15 +547,21 @@ impl<'a> Parser<'a> {
                     "NSFX" => name.suffix = Some(self.take_line_value()),
                     "SPFX" => name.surname_prefix = Some(self.take_line_value()),
                     "SURN" => name.surname = Some(self.take_line_value()),
-                    _ => { 
-                        println!("WARNING: {} Unhandled Name Tag: {}", self.dbg(), tag); 
-                        self.tokenizer.next_token();
-                    } 
+                    _ => {
+                        println!("WARNING: {} Unhandled Name Tag: {}", self.dbg(), tag);
+                        self.skip_level(current_level);
+                    }
                 },
-                Token::Level(_) => self.tokenizer.next_token(),
-                _ => {
-                    println!("WARNING: Unhandled Name Token: {:?}", self.tokenizer.current_token);
+                Token::Level(new_level) => {
+                    current_level = *new_level;
                     self.tokenizer.next_token();
+                }
+                _ => {
+                    println!(
+                        "WARNING: Unhandled Name Token: {:?}",
+                        self.tokenizer.current_token
+                    );
+                    self.skip_level(current_level);
                 }
             }
         }
@@ -516,12 +569,13 @@ impl<'a> Parser<'a> {
         name
     }
 
-    fn parse_event(&mut self, tag: &str, level: u8) -> Event {
+    fn parse_event(&mut self, tag: &str, start_level: u8) -> Event {
         self.tokenizer.next_token();
         let mut event = Event::from_tag(tag);
+        let mut current_level = start_level;
         loop {
             if let Token::Level(cur_level) = self.tokenizer.current_token {
-                if cur_level <= level {
+                if cur_level <= start_level {
                     break;
                 }
             }
@@ -529,16 +583,22 @@ impl<'a> Parser<'a> {
                 Token::Tag(tag) => match tag.as_str() {
                     "DATE" => event.date = Some(self.take_line_value()),
                     "PLAC" => event.place = Some(self.take_line_value()),
-                    "SOUR" => event.add_citation(self.parse_citation(level + 1)),
-                    _ =>{
+                    "SOUR" => event.add_citation(self.parse_citation(current_level)),
+                    _ => {
                         println!("WARNING: {} Unhandled Event Tag: {}", self.dbg(), tag);
-                        self.tokenizer.next_token();
+                        self.skip_level(current_level);
                     }
                 },
-                Token::Level(_) => self.tokenizer.next_token(),
-                _ =>{
-                    println!("WARNING: Unhandled Event Token: {:?}", self.tokenizer.current_token);
+                Token::Level(new_level) => {
+                    current_level = *new_level;
                     self.tokenizer.next_token();
+                }
+                _ => {
+                    println!(
+                        "WARNING: Unhandled Event Token: {:?}",
+                        self.tokenizer.current_token
+                    );
+                    self.skip_level(current_level);
                 }
             }
         }
@@ -546,9 +606,10 @@ impl<'a> Parser<'a> {
     }
 
     /// Parses ADDR tag
-    fn parse_address(&mut self, level: u8) -> Address {
+    fn parse_address(&mut self, start_level: u8) -> Address {
         // skip ADDR tag
         self.tokenizer.next_token();
+        let mut current_level = start_level;
         let mut address = Address::default();
         let mut value = String::new();
 
@@ -560,7 +621,7 @@ impl<'a> Parser<'a> {
 
         loop {
             if let Token::Level(cur_level) = self.tokenizer.current_token {
-                if cur_level <= level {
+                if cur_level <= start_level {
                     break;
                 }
             }
@@ -577,18 +638,21 @@ impl<'a> Parser<'a> {
                     "STAE" => address.state = Some(self.take_line_value()),
                     "POST" => address.post = Some(self.take_line_value()),
                     "CTRY" => address.country = Some(self.take_line_value()),
-                    _ =>{
+                    _ => {
                         println!("WARNING: {} Unhandled Address Tag: {}", self.dbg(), tag);
-                        self.tokenizer.next_token();
+                        self.skip_level(current_level);
                     }
                 },
-                Token::Level(_) => self.tokenizer.next_token(),
-                _ =>{ 
+                Token::Level(new_level) => {
+                    current_level = *new_level;
+                    self.tokenizer.next_token();
+                }
+                _ => {
                     println!(
                         "WARNING: Unhandled Address Token: {:?}",
                         self.tokenizer.current_token
                     );
-                    self.tokenizer.next_token();
+                    self.skip_level(current_level);
                 }
             }
         }
@@ -600,32 +664,36 @@ impl<'a> Parser<'a> {
         address
     }
 
-    fn parse_citation(&mut self, level: u8) -> SourceCitation {
+    fn parse_citation(&mut self, start_level: u8) -> SourceCitation {
         let mut citation = SourceCitation {
             xref: self.take_line_value(),
             page: None,
         };
+        let mut current_level = start_level;
         loop {
             if let Token::Level(cur_level) = self.tokenizer.current_token {
-                if cur_level <= level {
+                if cur_level <= start_level {
                     break;
                 }
             }
             match &self.tokenizer.current_token {
                 Token::Tag(tag) => match tag.as_str() {
                     "PAGE" => citation.page = Some(self.take_line_value()),
-                    _ =>{
+                    _ => {
                         println!("WARNING: {} Unhandled Citation Tag: {}", self.dbg(), tag);
-                        self.tokenizer.next_token();
+                        self.skip_level(current_level);
                     }
                 },
-                Token::Level(_) => self.tokenizer.next_token(),
+                Token::Level(new_level) => {
+                    current_level = *new_level;
+                    self.tokenizer.next_token();
+                }
                 _ => {
                     println!(
-                    "WARNING: Unhandled Citation Token: {:?}",
-                    self.tokenizer.current_token
-                );
-                    self.tokenizer.next_token();
+                        "WARNING: Unhandled Citation Token: {:?}",
+                        self.tokenizer.current_token
+                    );
+                    self.skip_level(current_level);
                 }
             }
         }
@@ -634,12 +702,13 @@ impl<'a> Parser<'a> {
 
     /// Takes the value of the current line including handling
     /// multi-line values from CONT & CONC tags.
-    fn take_continued_text(&mut self, level: u8) -> String {
+    fn take_continued_text(&mut self, start_level: u8) -> String {
         let mut value = self.take_line_value();
+        let mut current_level = start_level;
 
         loop {
             if let Token::Level(cur_level) = self.tokenizer.current_token {
-                if cur_level <= level {
+                if cur_level <= start_level {
                     break;
                 }
             }
@@ -653,18 +722,25 @@ impl<'a> Parser<'a> {
                         value.push(' ');
                         value.push_str(&self.take_line_value())
                     }
-                    _ =>{
-                        println!("WARNING: {} Unhandled Continuation Tag: {}", self.dbg(), tag);
-                        self.tokenizer.next_token();
+                    _ => {
+                        println!(
+                            "WARNING: {} Unhandled Continuation Tag: {}",
+                            self.dbg(),
+                            tag
+                        );
+                        self.skip_level(current_level);
                     }
                 },
-                Token::Level(_) => self.tokenizer.next_token(),
+                Token::Level(new_level) => {
+                    current_level = *new_level;
+                    self.tokenizer.next_token();
+                }
                 _ => {
                     println!(
                         "Unhandled Continuation Token: {:?}",
                         self.tokenizer.current_token
                     );
-                    self.tokenizer.next_token();
+                    self.skip_level(current_level);
                 }
             }
         }
