@@ -20,15 +20,16 @@ fn main() {
 
     let data: GedcomData;
 
-    if let Ok(contents) = read_relative(filename) {
+    let res = read_relative(&filename);
+    if let Ok(contents) = res {
         let mut parser = Parser::new(contents.chars());
         data = parser.parse_record();
 
         println!("Parsing complete!");
         // println!("\n\n{:#?}", data);
         data.stats();
-    } else {
-        exit_with_error(&format!("File '{}' not found.", filename));
+    } else if let Err(io_err) = res{
+        exit_with_error(&format!("Could not open`{}` : {}", filename, io_err.to_string()));
     }
 }
 
