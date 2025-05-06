@@ -18,6 +18,7 @@ pub enum EventType {
 
     // "Other" is used to construct an event without requiring an explicit event type
     Other,
+    Unkown
 }
 
 impl ToString for EventType {
@@ -63,7 +64,10 @@ impl Event {
             "MARR" => EventType::Marriage,
             "RESI" => EventType::Residence,
             "OTHER" => EventType::Other,
-            _ => panic!("Unrecognized event tag: {}", tag),
+            _ => {
+                println!("Unrecognized event tag: {}", tag);
+                EventType::Unkown
+            }
         };
         Event::new(etype)
     }
