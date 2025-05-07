@@ -207,6 +207,7 @@ impl<'a> Parser<'a> {
                     "CHAN" => {
                         // assuming it always only has a single DATE subtag
                         self.tokenizer.next_token(); // level
+                        current_level += 1;
                         self.tokenizer.next_token(); // DATE tag
                         individual.last_updated = Some(self.take_line_value());
                     }
