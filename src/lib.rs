@@ -25,6 +25,7 @@ mod util;
 pub mod parser;
 pub mod tokenizer;
 pub mod types;
+pub mod ffi;
 
 mod tree;
 pub use tree::GedcomData;
