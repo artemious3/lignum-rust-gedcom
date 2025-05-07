@@ -10,7 +10,7 @@ cp = find_program('cp')
 
 cargo_cmd = [cargo, 'build', '--release', '--lib']
 
-build = run_command(cargo_cmd)
+build = run_command(cargo_cmd, check: true)
 
 target_path = join_paths( meson.current_source_dir(), 'target', 'release')
 
