@@ -8,16 +8,24 @@ cp = find_program('cp')
 # integrate Cargo into Meson better than this
 # Please dm me if you did
 
-cargo_cmd = [cargo, 'build', '--release', '--lib']
+# cargo_cmd = [cargo, 'build', '--release', '--lib']
 
-build = run_command(cargo_cmd, check: true)
 
 target_path = join_paths( meson.current_source_dir(), 'target', 'release')
+libgedcom_cargo_path = join_paths(target_path, 'libgedcom.a')
+
+# gedcom_lib_target = custom_target( 
+#     input : join_paths(target_path, 'libgedcom.a'),
+#     output : ['libgedcom.a'],
+#     command : [cp, '@INPUT@', '@OUTDIR@'],
+# )
 
 gedcom_lib_target = custom_target( 
-    input : join_paths(target_path, 'libgedcom.a'),
+    build_always_stale : true,
     output : ['libgedcom.a'],
-    command : [cp, '@INPUT@', '@OUTDIR@'],
+    command : [cargo, '+nightly', '-Z', 'unstable-options', '-C', meson.current_source_dir(),
+                                  'build', '--lib', '--release',  '&&',
+              cp, libgedcom_cargo_path, '@OUTDIR@']
 )
 
 gedcom_inc = custom_target('Gedcom.h',
