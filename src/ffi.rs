@@ -1,5 +1,27 @@
 use std::{ffi::{c_char, CString, CStr}, mem};
 
+#[repr(C)]
+enum Gender {
+    Male,
+    Female,
+    Nonbinary, 
+    Unknown
+}
+
+impl From<&crate::types::Gender> for Gender {
+    fn from(value: &crate::types::Gender) -> Self {
+        match value {
+            crate::types::Gender::Male => Gender::Male,
+            crate::types::Gender::Female => Gender::Female,
+            crate::types::Gender::Unknown => Gender::Unknown,
+            crate::types::Gender::Nonbinary => Gender::Nonbinary,
+        }
+    }
+}
+
+
+
+
 /// C compatible representation of Optional<String>
 #[repr(C)]
 pub struct MaybeString {
@@ -143,13 +165,16 @@ pub struct Individual {
     pub xref: MaybeString,
     /// Name
     pub name: MaybeName,
+    /// Gender 
+    pub sex : Gender,
 }
 
 impl Individual{
     fn new(ind : &crate::types::Individual) -> Self {
         Individual {
             xref : MaybeString::new(&ind.xref),
-            name : MaybeName::new(&ind.name)
+            name : MaybeName::new(&ind.name),
+            sex : Gender::from(&ind.sex)
         }
     }
 }
