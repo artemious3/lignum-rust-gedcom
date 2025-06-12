@@ -1,4 +1,4 @@
-use std::{ffi::{c_char, CString, CStr}, mem};
+use std::{ffi::{c_char, CStr, CString}, mem, ptr};
 
 #[repr(C)]
 enum Gender {
@@ -291,13 +291,20 @@ impl GedcomData {
 /// Calle is responsible for freeing data, calling `free_parse`
 #[unsafe(no_mangle)]
 pub extern fn parse(content_raw: *const c_char) -> *mut GedcomData {
-    let content_cstr = unsafe {
-        CStr::from_ptr(content_raw)
-    };
-    let content = content_cstr.to_string_lossy();
-    let data = crate::parse(content.chars());
-    let c_data = GedcomData::new(data);
-    Box::<GedcomData>::into_raw(Box::new(c_data))
+    let result = std::panic::catch_unwind(||{
+        let content_cstr = unsafe {
+            CStr::from_ptr(content_raw)
+        };
+        let content = content_cstr.to_string_lossy();
+        let data = crate::parse(content.chars());
+        let c_data = GedcomData::new(data);
+        Box::<GedcomData>::into_raw(Box::new(c_data))
+    });
+
+    match result {
+        Err(_) => std::ptr::null_mut(),
+        Ok(ptr) => ptr
+    }
 }
 
 
