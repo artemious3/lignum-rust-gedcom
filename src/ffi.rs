@@ -287,10 +287,11 @@ impl GedcomData {
 }
 
 
+
 /// Parse string and return C compatible gedcom data
 /// Calle is responsible for freeing data, calling `free_parse`
 #[unsafe(no_mangle)]
-pub extern fn parse(content_raw: *const c_char) -> *mut GedcomData {
+pub extern fn parse(content_raw: *const c_char, err_str : *mut c_char, err_maxsize : usize) -> *mut GedcomData {
     let result = std::panic::catch_unwind(||{
         let content_cstr = unsafe {
             CStr::from_ptr(content_raw)
@@ -302,7 +303,22 @@ pub extern fn parse(content_raw: *const c_char) -> *mut GedcomData {
     });
 
     match result {
-        Err(_) => std::ptr::null_mut(),
+        Err(cause) => {
+            cause.downcast_ref::<String>().inspect(|s|{
+                if s.len() < err_maxsize {
+                    let mut iter = err_str;
+                    for ch in s.chars(){
+                        unsafe {
+                            *iter = ch as core::ffi::c_char;
+                            iter = iter.add(1);
+                        }
+                    }
+                    unsafe { *iter = 0 as core::ffi::c_char; }
+                }
+            });
+
+            std::ptr::null_mut()
+        }
         Ok(ptr) => ptr
     }
 }
