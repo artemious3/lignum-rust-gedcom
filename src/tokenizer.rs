@@ -112,7 +112,9 @@ impl<'a> Tokenizer<'a> {
             self.next_char();
         }
 
-        digits.iter().collect::<String>().parse::<u8>().unwrap()
+        digits.iter().collect::<String>().parse::<u8>().unwrap_or_else(|_|{
+            panic!("Valid level number not found on line {}", self.line)
+        })
     }
 
     fn extract_word(&mut self) -> String {
